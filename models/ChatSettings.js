@@ -2,7 +2,8 @@ import mongoose from "mongoose";
 
 const ChatSettingsSchema = new mongoose.Schema({
   chatId: { type: String, required: true, unique: true },
-  intervalMinutes: { type: Number, default: 1 },
+  // Default to 180 minutes (3 hours) as requested
+  intervalMinutes: { type: Number, default: 180 },
   updatedAt: { type: Date, default: Date.now },
 });
 

@@ -19,7 +19,8 @@ const { url, chatId } = body;
 if (!url) return new Response(JSON.stringify({ error: 'missing url' }), { status: 400 });
 
 
-const existing = await Product.findOne({ url });
+// Prevent duplicates across same chat if chatId provided, otherwise global URL duplicate
+const existing = chatId ? await Product.findOne({ url, chatId }) : await Product.findOne({ url });
 if (existing) return new Response(JSON.stringify({ error: 'already exists' }), { status: 409 });
 
 // Try to fetch initial info (best-effort)

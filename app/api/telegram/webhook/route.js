@@ -155,8 +155,13 @@ export async function POST(request) {
     } else {
       await Product.create({ url, chatId: String(chatId), lastPrice: price, title });
     }
+    // Ensure default frequency is set to 3 hours for this chat
+    const settings = await ChatSettings.findOne({ chatId: String(chatId) });
+    if (!settings) {
+      await ChatSettings.create({ chatId: String(chatId), intervalMinutes: 180 });
+    }
     const label = title ? `${title}\n${url}` : url;
-    await safeSend(chatId, `✅ Tracking started for:\n${label}\nInitial price: ${price}`);
+    await safeSend(chatId, `✅ Tracking started for:\n${label}\nInitial price: ${price}\n\nDefault check frequency is 3 hours. To change it, send /frequency and pick a new interval.`);
     return new Response('ok');
   }
   if (/^\/list\b/i.test(text)) {
