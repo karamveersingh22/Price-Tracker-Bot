@@ -1,24 +1,42 @@
 import dbConnect from "@/lib/dbConnect";
 import Product from "@/models/Product";
+import ChatSettings from "@/models/ChatSettings";
 import { getPrice, getProductInfo } from "@/lib/tracker";
-import TelegramBot from "node-telegram-bot-api";
+import { sendMessage } from "@/lib/telegram";
 
-export async function POST(request) {
-  const secret = request.headers.get("x-check-secret") || "";
-  // Accept either server-only secret or public one used by dashboard
-  if (secret !== process.env.CHECK_SECRET && secret !== process.env.NEXT_PUBLIC_CHECK_SECRET)
-    return new Response(JSON.stringify({ error: "unauthorized" }), {
-      status: 401,
-    });
+async function handleCheck(request) {
+  const url = new URL(request.url);
+  const qpSecret = url.searchParams.get("secret") || "";
+  const headerSecret = request.headers.get("x-check-secret") || "";
+  const secret = headerSecret || qpSecret;
+  // Accept either server-only secret or public one used by dashboard (in dev). Prefer CHECK_SECRET in prod.
+  if (secret !== process.env.CHECK_SECRET && secret !== process.env.NEXT_PUBLIC_CHECK_SECRET) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
+  }
 
   const uri = process.env.MONGODB_URI;
   await dbConnect(uri);
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const bot = new TelegramBot(botToken, { polling: false });
 
   const products = await Product.find({});
   const results = [];
   for (const p of products) {
+    // Respect per-chat frequency via ChatSettings
+    let intervalMinutes = 1; // default
+    if (p.chatId) {
+      try {
+        const s = await ChatSettings.findOne({ chatId: String(p.chatId) }).lean();
+        if (s && Number.isFinite(s.intervalMinutes)) intervalMinutes = s.intervalMinutes;
+      } catch {}
+    }
+    if (p.lastCheckedAt) {
+      const msSince = Date.now() - new Date(p.lastCheckedAt).getTime();
+      const needMs = intervalMinutes * 60 * 1000;
+      if (msSince < needMs) {
+        results.push({ url: p.url, status: 'skipped', reason: `next check in ${Math.ceil((needMs - msSince)/1000)}s` });
+        continue;
+      }
+    }
+
     const newPrice = await getPrice(p.url);
     if (newPrice == null) continue;
     if (p.lastPrice == null) {
@@ -44,7 +62,7 @@ export async function POST(request) {
             ? `⚠️ Price increased!\n${label}\nOld: ${p.lastPrice}\nNow: ${newPrice}`
             : `✅ Price dropped!\n${label}\nOld: ${p.lastPrice}\nNow: ${newPrice}`;
         try {
-          await bot.sendMessage(p.chatId.toString(), text);
+          await sendMessage(p.chatId.toString(), text);
         } catch (e) {
           console.error("tg send failed", e.message);
         }
@@ -61,4 +79,12 @@ export async function POST(request) {
   }
 
   return new Response(JSON.stringify({ ok: true, results }), { status: 200 });
+}
+
+export async function POST(request) {
+  return handleCheck(request);
+}
+
+export async function GET(request) {
+  return handleCheck(request);
 }
